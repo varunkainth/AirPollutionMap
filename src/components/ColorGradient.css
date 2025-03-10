@@ -1,0 +1,33 @@
+.color-gradient {
+    position: absolute;
+    bottom: 85px;
+    left: 20px;
+    width: 40px;
+    height: 200px;
+    background: linear-gradient(to top, #7e0023, #99004c, #ff0000, #ff7e00, #ffff00, #00e400);
+    z-index: 1000;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  }
+  
+  .gradient-labels {
+    position: absolute;
+    bottom: 85px;
+    left: 70px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 200px;
+    z-index: 1000;
+    font-size: 11px;
+    color: #333;
+    text-shadow: 1px 1px 1px white;
+  }
+  
+  .gradient-value {
+    position: relative;
+  }
+  
+  .gradient-container {
+    position: relative;
+  }
