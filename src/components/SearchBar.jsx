@@ -10,6 +10,7 @@ function SearchBar({ onCitySearch }) {
   const [error, setError] = useState('');
   const searchTimeoutRef = useRef(null);
   const suggestionRef = useRef(null);
+  const inputRef = useRef(null);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -35,6 +36,7 @@ function SearchBar({ onCitySearch }) {
     // Don't search if query is too short
     if (!searchQuery || searchQuery.length < 2) {
       setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
 
@@ -44,7 +46,7 @@ function SearchBar({ onCitySearch }) {
       try {
         const cities = await searchCities(searchQuery);
         setSuggestions(cities);
-        setShowSuggestions(true);
+        setShowSuggestions(cities.length > 0);
       } catch (err) {
         console.error('Error fetching suggestions:', err);
         setSuggestions([]);
@@ -74,7 +76,13 @@ function SearchBar({ onCitySearch }) {
     setShowSuggestions(false);
     
     try {
-      const { city, coordinates } = await searchCities(searchQuery, true);
+      const result = await searchCities(searchQuery, true);
+      if (!result) {
+        setError('Could not find the location. Please check the city name.');
+        return;
+      }
+      
+      const { city, coordinates } = result;
       onCitySearch(city, coordinates);
     } catch (err) {
       setError('Could not find the location. Please check the city name.');
@@ -85,21 +93,56 @@ function SearchBar({ onCitySearch }) {
   };
 
   const handleSuggestionClick = (suggestion) => {
-    setSearchQuery(suggestion.name);
+    // Extract display name from suggestion if it exists, otherwise use name
+    const cityName = suggestion.display || suggestion.name;
+    
+    setSearchQuery(cityName);
     setShowSuggestions(false);
-    onCitySearch(suggestion.name, { lat: suggestion.lat, lng: suggestion.lon });
+    onCitySearch(
+      cityName, 
+      { lat: suggestion.lat, lng: suggestion.lon || suggestion.lng }
+    );
+  };
+
+  const formatSuggestionLabel = (suggestion) => {
+    // If the suggestion already has a formatted display name, use it
+    if (suggestion.display) {
+      return suggestion.display;
+    }
+    
+    // Otherwise build a formatted name with available data
+    let label = suggestion.name;
+    
+    if (suggestion.state && !suggestion.name.includes(suggestion.state)) {
+      label += `, ${suggestion.state}`;
+    }
+    
+    if (suggestion.country && suggestion.country !== 'IN') {
+      label += `, ${suggestion.country}`;
+    } else if (suggestion.country === 'IN' && !label.includes('India')) {
+      label += ', India';
+    }
+    
+    return label;
   };
 
   return (
     <div className="search-bar" ref={suggestionRef}>
       <form onSubmit={handleSearch}>
         <input
+          ref={inputRef}
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search city (e.g., Delhi, Mumbai)"
+          placeholder="Search city (e.g., Delhi, Mumbai, London)"
           disabled={isLoading}
-          onFocus={() => searchQuery.length >= 2 && setShowSuggestions(true)}
+          onFocus={() => {
+            if (searchQuery.length >= 2 && suggestions.length > 0) {
+              setShowSuggestions(true);
+            }
+          }}
+          aria-label="Search for a city"
+          autoComplete="off"
         />
         <button type="submit" disabled={isLoading}>
           {isLoading ? 'Searching...' : 'Search'}
@@ -112,16 +155,22 @@ function SearchBar({ onCitySearch }) {
             <li 
               key={`${suggestion.name}-${index}`}
               onClick={() => handleSuggestionClick(suggestion)}
+              tabIndex={0}
+              role="option"
+              aria-selected="false"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  handleSuggestionClick(suggestion);
+                }
+              }}
             >
-              {suggestion.name}
-              {suggestion.state ? `, ${suggestion.state}` : ''}
-              {suggestion.country ? `, ${suggestion.country}` : ''}
+              {formatSuggestionLabel(suggestion)}
             </li>
           ))}
         </ul>
       )}
       
-      {error && <p className="error-message">{error}</p>}
+      {error && <p className="error-message" aria-live="assertive">{error}</p>}
     </div>
   );
 }

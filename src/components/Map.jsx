@@ -24,28 +24,43 @@ const getAQICategoryName = (aqi) => {
   return "Hazardous";
 };
 
-// Generate simulated AQI data instead of making API calls
+// Global persistent store for random spots
+const randomSpotsStore = {
+  spots: {},
+  add(spot) {
+    this.spots[spot.id] = spot;
+  },
+  getAll() {
+    return Object.values(this.spots);
+  },
+  getInBounds(bounds) {
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+    return this.getAll().filter(spot => 
+      spot.lat >= sw.lat && spot.lat <= ne.lat && 
+      spot.lng >= sw.lng && spot.lng <= ne.lng
+    );
+  },
+  clear() {
+    this.spots = {};
+  }
+};
+
+// Generate simulated AQI data
 const generateSimulatedAQIData = (lat, lng) => {
-  // Use location to seed the random number generator for consistency
+  // Create a seed from coordinates for consistent randomness
   const seed = (lat * 10000) + (lng * 10000);
   const random = Math.sin(seed) * 0.5 + 0.5; // Value between 0-1
   
-  // Generate a PM2.5 value that's somewhat realistic
-  // Base value between 5-50 μg/m³
-  const basePM25 = 5 + (random * 45); 
+  // Generate PM2.5 value
+  const pm25 = 5 + (random * 95); // 5-100 μg/m³
+  const pm10 = pm25 * (1.5 + (Math.sin(seed * 2) * 0.3));
+  const o3 = 20 + (random * 80);
+  const no2 = 10 + (random * 50);
+  const so2 = 5 + (random * 20);
+  const co = 300 + (random * 1700);
   
-  // Add some geographical variance - more pollution near the equator
-  const latFactor = 1 - (Math.abs(lat) / 90); // 1 at equator, 0 at poles
-  const adjustedPM25 = basePM25 * (0.7 + (latFactor * 0.6));
-  
-  // Create other pollutants based on PM2.5 with some variation
-  const pm10 = adjustedPM25 * (1.5 + (Math.sin(seed * 2) * 0.5));
-  const o3 = 20 + (random * 80); // Ozone between 20-100
-  const no2 = 10 + (random * 50); // NO2 between 10-60
-  const so2 = 5 + (random * 20);  // SO2 between 5-25
-  const co = 300 + (random * 1700); // CO between 300-2000
-  
-  // Create a simulated response object that matches the OpenWeatherMap API format
+  // Create a response object that matches expected format
   return {
     coord: { lon: lng, lat: lat },
     list: [
@@ -57,194 +72,165 @@ const generateSimulatedAQIData = (lat, lng) => {
           no2: no2,
           o3: o3,
           so2: so2,
-          pm2_5: adjustedPM25,
+          pm2_5: pm25,
           pm10: pm10,
           nh3: 3 + (random * 12)
         },
-        dt: Math.floor(Date.now() / 1000) // Current timestamp in seconds
+        dt: Math.floor(Date.now() / 1000)
       }
     ]
   };
 };
 
-// Generate an area name based on coordinates
+// Generate a realistic area name from coordinates
 const generateAreaName = (lat, lng) => {
-  // Create random but consistent area names based on coordinates
-  const latPart = Math.abs(lat).toFixed(2);
-  const lngPart = Math.abs(lng).toFixed(2);
-  
-  // Extract digits to create a somewhat pronounceable name
-  const digits = `${latPart}${lngPart}`.replace(/\./g, '');
-  
-  // List of prefixes and suffixes for area names
   const prefixes = ['North', 'South', 'East', 'West', 'Central', 'Upper', 'Lower', 'New', 'Old'];
-  const suffixes = ['District', 'Area', 'Zone', 'Sector', 'Region', 'Heights', 'Valley', 'Gardens', 'Park'];
+  const suffixes = ['District', 'Area', 'Zone', 'Sector', 'Region', 'Heights', 'Park'];
   
-  // Use the coordinates to select from the lists
-  const prefixIndex = Math.floor((parseInt(digits.substring(0, 2)) % prefixes.length));
-  const suffixIndex = Math.floor((parseInt(digits.substring(2, 4)) % suffixes.length));
+  // Create a seed from coordinates
+  const seed = Math.abs(lat * 1000 + lng * 100000);
+  const prefixIndex = Math.floor(seed % prefixes.length);
+  const suffixIndex = Math.floor((seed / 10) % suffixes.length);
   
-  // Create a middle part that sounds like a place name
+  // Create a pronounceable middle part
   const vowels = 'aeiou';
   const consonants = 'bcdfghjklmnprstvw';
-  
-  // Use more digits to create the middle part
   let middlePart = '';
-  for (let i = 0; i < 3; i++) {
-    const consonantIndex = parseInt(digits.substring(i*2, i*2+1)) % consonants.length;
-    const vowelIndex = parseInt(digits.substring(i*2+1, i*2+2)) % vowels.length;
+  
+  for (let i = 0; i < 2; i++) {
+    const consonantIndex = Math.floor((seed / (100 * (i + 1))) % consonants.length);
+    const vowelIndex = Math.floor((seed / (10 * (i + 1))) % vowels.length);
     middlePart += consonants[consonantIndex] + vowels[vowelIndex];
   }
   
-  // Capitalize first letter
   middlePart = middlePart.charAt(0).toUpperCase() + middlePart.slice(1);
-  
   return `${prefixes[prefixIndex]} ${middlePart} ${suffixes[suffixIndex]}`;
 };
 
-// Component to track map movements and generate random locations
-function MapController({ coordinates, onDynamicLocationsChange }) {
+// Map Controller component to handle map events and random spot generation
+function MapController({ coordinates, onSpotsUpdate, maxRandomSpots = 15 }) {
   const map = useMap();
-  const isInitialLoad = useRef(true);
-  const moveEndTimeoutRef = useRef(null);
-  const lastBoundsRef = useRef(null);
+  const isInitialMount = useRef(true);
+  const [isGenerating, setIsGenerating] = useState(false);
   
-  // Function to generate random locations within the map bounds
-  const generateRandomLocations = useCallback(async () => {
+  // Function to generate random spots - limited to max number
+  const generateRandomSpots = useCallback(async () => {
+    if (isGenerating) return;
+    setIsGenerating(true);
+    
     try {
-      // Get current map bounds
       const bounds = map.getBounds();
-      const boundsString = bounds.toBBoxString();
+      const visibleSpots = randomSpotsStore.getInBounds(bounds);
       
-      // Skip if bounds haven't changed significantly
-      if (lastBoundsRef.current === boundsString && !isInitialLoad.current) {
+      // Target number of spots - always between 10-15
+      const minSpots = 10;
+      const targetSpots = Math.min(maxRandomSpots, 15);
+      
+      // If we already have enough spots in view and not initial mount, just update
+      if (visibleSpots.length >= minSpots && !isInitialMount.current) {
+        // If we have too many, limit what we return
+        onSpotsUpdate(visibleSpots.slice(0, targetSpots));
+        setIsGenerating(false);
         return;
       }
       
-      // Update last bounds reference
-      lastBoundsRef.current = boundsString;
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const latRange = ne.lat - sw.lat;
+      const lngRange = ne.lng - sw.lng;
       
-      const northEast = bounds.getNorthEast();
-      const southWest = bounds.getSouthWest();
+      // Only create new spots if we don't have enough
+      const spotsToCreate = Math.max(0, minSpots - visibleSpots.length);
       
-      // Get current zoom level
-      const zoom = map.getZoom();
-      
-      // Determine number of points based on zoom level
-      let numPoints;
-      if (zoom <= 8) numPoints = 12;
-      else if (zoom <= 10) numPoints = 18;
-      else if (zoom <= 12) numPoints = 25;
-      else numPoints = 30;
-      
-      const latRange = northEast.lat - southWest.lat;
-      const lngRange = northEast.lng - southWest.lng;
-      
-      // Generate random locations
-      const randomLocations = [];
-      
-      // Use a simpler approach to reduce computational load
-      const minDistanceBetweenPoints = Math.min(latRange, lngRange) / (Math.sqrt(numPoints) * 2);
-      
-      // Keep trying to add points until we have enough or reach max attempts
-      let attempts = 0;
-      const maxAttempts = numPoints * 5;
-      
-      while (randomLocations.length < numPoints && attempts < maxAttempts) {
-        attempts++;
+      if (spotsToCreate > 0) {
+        // Create an array of potential positions
+        const positions = [];
         
-        // Generate a random position within bounds
-        const lat = southWest.lat + Math.random() * latRange;
-        const lng = southWest.lng + Math.random() * lngRange;
+        // Divide the map into a grid to ensure even distribution
+        const gridSize = Math.ceil(Math.sqrt(targetSpots));
+        const latStep = latRange / gridSize;
+        const lngStep = lngRange / gridSize;
         
-        // Check if this point is far enough from all existing points
-        let isFarEnough = true;
-        for (const existingLocation of randomLocations) {
-          const distance = Math.sqrt(
-            Math.pow(lat - existingLocation.lat, 2) + 
-            Math.pow(lng - existingLocation.lng, 2)
-          );
-          
-          if (distance < minDistanceBetweenPoints) {
-            isFarEnough = false;
-            break;
+        // Generate grid positions with some randomness
+        for (let i = 0; i < gridSize; i++) {
+          for (let j = 0; j < gridSize; j++) {
+            // Add some randomness to position within grid cell
+            const randomLat = sw.lat + (i * latStep) + (Math.random() * latStep);
+            const randomLng = sw.lng + (j * lngStep) + (Math.random() * lngStep);
+            
+            positions.push({ lat: randomLat, lng: randomLng });
           }
         }
         
-        // If point is valid, add it to our list
-        if (isFarEnough) {
-          const id = `random-${lat.toFixed(6)}-${lng.toFixed(6)}`;
-          // Generate a more realistic area name
-          const name = generateAreaName(lat, lng);
+        // Shuffle and take only what we need
+        const shuffledPositions = positions
+          .sort(() => 0.5 - Math.random())
+          .slice(0, spotsToCreate);
+        
+        // Create spots at these positions
+        for (const pos of shuffledPositions) {
+          const id = `spot-${pos.lat.toFixed(5)}-${pos.lng.toFixed(5)}`;
           
-          // Generate simulated AQI data for this location immediately
-          const aqiData = generateSimulatedAQIData(lat, lng);
-          
-          randomLocations.push({
-            id,
-            name,
-            lat,
-            lng,
-            isRandomPoint: true,
-            // Pre-populate with simulated data
-            aqiData,
-            // Add current timestamp
-            timestamp: new Date().toISOString()
-          });
+          // Only create if not already in store
+          if (!randomSpotsStore.spots[id]) {
+            // Generate name and simulated AQI data
+            const name = generateAreaName(pos.lat, pos.lng);
+            const aqiData = generateSimulatedAQIData(pos.lat, pos.lng);
+            
+            // Add to store
+            randomSpotsStore.add({
+              id,
+              name,
+              lat: pos.lat,
+              lng: pos.lng,
+              aqiData,
+              timestamp: new Date().toISOString(),
+              isRandomSpot: true
+            });
+          }
         }
       }
       
-      // Notify parent component of the new random locations with pre-populated data
-      onDynamicLocationsChange(randomLocations);
+      // Update visible spots
+      const updatedVisibleSpots = randomSpotsStore.getInBounds(bounds);
+      // Limit to target number of spots
+      onSpotsUpdate(updatedVisibleSpots.slice(0, targetSpots));
     } catch (error) {
-      console.error("Error generating random locations:", error);
-      // Ensure we don't get stuck in a loading state
-      onDynamicLocationsChange([]);
+      console.error("Error generating random spots:", error);
+    } finally {
+      setIsGenerating(false);
+      isInitialMount.current = false;
     }
-  }, [map, onDynamicLocationsChange]);
-
-  // Setup event handlers for map movement with stronger debounce
+  }, [map, onSpotsUpdate, isGenerating, maxRandomSpots]);
+  
+  // Set initial view and generate spots
+  useEffect(() => {
+    map.setView([coordinates.lat, coordinates.lng], 10);
+    isInitialMount.current = true;
+    
+    // Clear spots store when coordinates change
+    randomSpotsStore.clear();
+    
+    // Generate initial spots with delay
+    setTimeout(() => {
+      generateRandomSpots();
+    }, 500);
+  }, [coordinates, map, generateRandomSpots]);
+  
+  // Handle map movement events
   useMapEvents({
     moveend: () => {
-      // Clear any existing timeout to prevent multiple calls
-      if (moveEndTimeoutRef.current) {
-        clearTimeout(moveEndTimeoutRef.current);
-      }
-      
-      // Delay to prevent excessive regeneration
-      moveEndTimeoutRef.current = setTimeout(() => {
-        generateRandomLocations();
-      }, 500);
+      generateRandomSpots();
     },
     zoomend: () => {
-      // Clear any existing timeout
-      if (moveEndTimeoutRef.current) {
-        clearTimeout(moveEndTimeoutRef.current);
-      }
-      
-      moveEndTimeoutRef.current = setTimeout(() => {
-        generateRandomLocations();
-      }, 500);
+      generateRandomSpots();
     }
   });
-
-  // Set initial map view and generate initial locations once
-  useEffect(() => {
-    if (isInitialLoad.current) {
-      map.setView([coordinates.lat, coordinates.lng], 10);
-      
-      // Initial generation with delay to ensure map is ready
-      setTimeout(() => {
-        generateRandomLocations();
-        isInitialLoad.current = false;
-      }, 300);
-    }
-  }, [coordinates, map, generateRandomLocations]);
-
+  
   return null;
 }
 
-// ZoomHandler component definition
+// ZoomHandler component
 function ZoomHandler({ onZoomChange }) {
   const map = useMapEvents({
     zoomend: () => {
@@ -255,20 +241,11 @@ function ZoomHandler({ onZoomChange }) {
 }
 
 // Main Map component
-function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect, city }) {
-  const [selectedLocation, setSelectedLocation] = useState(null);
+function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect, city, maxRandomSpots = 15 }) {
   const [currentZoom, setCurrentZoom] = useState(10);
-  const [dynamicLocations, setDynamicLocations] = useState([]);
+  const [randomSpots, setRandomSpots] = useState([]);
   const mapRef = useRef(null);
   
-  // To track if component is mounted
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
   // AQI color mapping
   const getAQIColor = (aqi) => {
     if (aqi <= 50) return '#00e400'; // Good
@@ -283,8 +260,21 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
   const calculateAQI = (data) => {
     if (!data || !data.list || !data.list[0]) return 0;
     
-    const components = data.list[0].components;
-    const pm25 = components.pm2_5;
+    // Use OpenWeatherMap AQI if available
+    const apiAqi = data.list[0].main?.aqi;
+    if (apiAqi) {
+      switch (apiAqi) {
+        case 1: return 25; // Good
+        case 2: return 75; // Moderate  
+        case 3: return 125; // Unhealthy for Sensitive Groups
+        case 4: return 175; // Unhealthy
+        case 5: return 250; // Very Unhealthy
+        default: return 0;
+      }
+    }
+    
+    // Calculate from PM2.5 if no AQI provided
+    const pm25 = data.list[0].components.pm2_5;
     
     if (pm25 <= 12) return Math.round((pm25 / 12) * 50);
     if (pm25 <= 35.4) return Math.round(((pm25 - 12.1) / 23.3) * 50 + 51);
@@ -294,57 +284,47 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
     return Math.round(((pm25 - 250.5) / 149.9) * 100 + 301);
   };
 
+  // Handle marker click - this function sends the location data to the sidebar
   const handleMarkerClick = (location) => {
-    setSelectedLocation(location);
     if (onLocationSelect) {
       onLocationSelect(location);
     }
   };
-
-  // Function to handle dynamic locations with pre-populated AQI data
-  const handleDynamicLocationsChange = useCallback((locations) => {
-    if (isMountedRef.current) {
-      setDynamicLocations(locations);
-    }
-  }, []);
   
-  // Calculate dynamic radius based on zoom level
-  const getCircleRadius = useCallback(() => {
-    const baseRadius = 2500;
-    
-    // Adjust radius based on zoom level with less variation
-    if (currentZoom <= 7) return baseRadius * 2;
-    if (currentZoom <= 9) return baseRadius * 1.5;
-    if (currentZoom === 10) return baseRadius;
-    if (currentZoom <= 12) return baseRadius * 0.6;
-    if (currentZoom <= 14) return baseRadius * 0.3;
-    return baseRadius * 0.15;
+  // Calculate circle radius based on zoom level - shrinks when zooming in
+  const getMainCircleRadius = useCallback(() => {
+    const baseRadius = 8000;
+    // More aggressive radius reduction when zooming in
+    return baseRadius * Math.pow(0.5, currentZoom - 10);
   }, [currentZoom]);
-
+  
+  const getSecondaryCircleRadius = useCallback(() => {
+    const baseRadius = 3000;
+    // More aggressive radius reduction when zooming in
+    return baseRadius * Math.pow(0.5, currentZoom - 10);
+  }, [currentZoom]);
+  
   // Handle zoom change
   const handleZoomChange = (newZoom) => {
     setCurrentZoom(newZoom);
   };
+  
+  // Handle random spots update
+  const handleSpotsUpdate = useCallback((spots) => {
+    setRandomSpots(spots);
+  }, []);
 
   // Main city AQI
   const aqi = airQualityData ? calculateAQI(airQualityData) : 0;
   const aqiColor = getAQIColor(aqi);
-
-  // Get reference to the map for zoom controls
-  const whenCreated = (mapInstance) => {
-    mapRef.current = mapInstance;
-  };
-
-  // Fallback city name in case prop is missing
-  const cityName = city || "Selected Location";
-
-  // Format a date as YYYY-MM-DD HH:MM:SS
+  
+  // Format date time
   const formatDateTime = (date) => {
     const d = new Date(date);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
   };
   
-  // Current date/time
+  // Current time for display
   const currentTime = formatDateTime(new Date());
 
   return (
@@ -353,15 +333,15 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
         center={[coordinates.lat, coordinates.lng]}
         zoom={10}
         style={{ height: "100%", width: "100%" }}
-        zoomControl={false} // Hide default zoom control
-        whenCreated={whenCreated}
+        zoomControl={false}
+        whenCreated={(map) => { mapRef.current = map; }}
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
         
-        {/* Main city circle overlay */}
+        {/* Main city circle - size reduces with zoom */}
         <Circle
           center={[coordinates.lat, coordinates.lng]}
           pathOptions={{
@@ -370,22 +350,21 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
             color: aqiColor,
             weight: 2
           }}
-          radius={8000}
+          radius={getMainCircleRadius()}
         >
-          {/* Using cityName variable here instead of directly using city prop */}
           <Tooltip direction="top" offset={[0, -5]} opacity={1} permanent>
-            {cityName}: AQI {aqi}
+            {city}: AQI {aqi}
           </Tooltip>
         </Circle>
 
-        {/* Named locations from multiLocationData */}
+        {/* Multi-location data circles */}
         {multiLocationData && multiLocationData.map((location) => {
           const locationAqi = location.aqiData ? calculateAQI(location.aqiData) : 0;
           const locationColor = getAQIColor(locationAqi);
           
           return (
             <Circle
-              key={location.id}
+              key={location.id || `${location.name}-${location.lat}-${location.lng}`}
               center={[location.lat, location.lng]}
               pathOptions={{
                 fillColor: locationColor,
@@ -393,7 +372,7 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
                 color: locationColor,
                 weight: 1
               }}
-              radius={3000}
+              radius={getSecondaryCircleRadius()}
               eventHandlers={{
                 click: () => handleMarkerClick(location)
               }}
@@ -409,71 +388,7 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
                     <strong>PM2.5:</strong> {location.aqiData?.list[0]?.components.pm2_5.toFixed(2)} μg/m³<br />
                     <strong>PM10:</strong> {location.aqiData?.list[0]?.components.pm10.toFixed(2)} μg/m³
                   </p>
-                  <button onClick={() => handleMarkerClick(location)}>
-                    Show Details
-                  </button>
-                </div>
-              </Popup>
-            </Circle>
-          );
-        })}
-
-        {/* Dynamic randomly positioned AQI points with simulated data */}
-        {dynamicLocations.map((location) => {
-          const locationAqi = location.aqiData ? calculateAQI(location.aqiData) : 0;
-          const locationColor = getAQIColor(locationAqi);
-          const aqiCategory = getAQICategoryName(locationAqi);
-          
-          // Use seeded pseudo-random for consistent rendering
-          const seed = location.id.charCodeAt(0) + location.id.charCodeAt(location.id.length - 1);
-          const pseudoRandom = Math.sin(seed) * 0.5 + 0.5;
-          
-          const baseRadius = getCircleRadius();
-          const adjustedRadius = baseRadius * (0.9 + pseudoRandom * 0.2);
-          const opacity = 0.5 + pseudoRandom * 0.2;
-          
-          return (
-            <Circle
-              key={location.id}
-              center={[location.lat, location.lng]}
-              pathOptions={{
-                fillColor: locationColor,
-                fillOpacity: opacity,
-                color: locationColor,
-                weight: 0.5
-              }}
-              radius={adjustedRadius}
-              eventHandlers={{
-                click: () => handleMarkerClick(location)
-              }}
-            >
-              {/* Enhanced tooltip with more details */}
-              <Tooltip className="detailed-tooltip">
-                <div>
-                  <strong>{location.name}</strong><br/>
-                  <span className="aqi-tag" style={{backgroundColor: locationColor, color: locationAqi > 150 ? 'white' : 'black'}}>
-                    AQI: {locationAqi} - {aqiCategory}
-                  </span><br/>
-                  <small>PM2.5: {location.aqiData?.list[0]?.components.pm2_5.toFixed(1)} μg/m³</small><br/>
-                  <small>Updated: {formatDateTime(location.timestamp || new Date())}</small>
-                </div>
-              </Tooltip>
-              <Popup>
-                <div className="location-popup">
-                  <h3>{location.name}</h3>
-                  <div className="aqi-indicator" style={{ backgroundColor: locationColor }}>
-                    AQI: {locationAqi} - {aqiCategory}
-                  </div>
-                  <p>
-                    <strong>PM2.5:</strong> {location.aqiData?.list[0]?.components.pm2_5.toFixed(2)} μg/m³<br />
-                    <strong>PM10:</strong> {location.aqiData?.list[0]?.components.pm10.toFixed(2)} μg/m³<br />
-                    <strong>O₃:</strong> {location.aqiData?.list[0]?.components.o3.toFixed(2)} μg/m³<br />
-                    <strong>NO₂:</strong> {location.aqiData?.list[0]?.components.no2.toFixed(2)} μg/m³<br />
-                    <strong>SO₂:</strong> {location.aqiData?.list[0]?.components.so2.toFixed(2)} μg/m³<br />
-                    <small className="coordinate-text">Coordinates: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}</small>
-                  </p>
-                  <div className="timestamp-info">Updated: {formatDateTime(location.timestamp || new Date())}</div>
-                  <button onClick={() => handleMarkerClick(location)}>
+                  <button onClick={() => handleMarkerClick(location)} className="show-details-btn">
                     Show in Sidebar
                   </button>
                 </div>
@@ -482,36 +397,77 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
           );
         })}
 
-        {/* Map controller for random location generation */}
+        {/* Random AQI spots - limited to 10-15 */}
+        {randomSpots.map((spot) => {
+          const spotAqi = calculateAQI(spot.aqiData);
+          const spotColor = getAQIColor(spotAqi);
+          const aqiCategory = getAQICategoryName(spotAqi);
+          
+          return (
+            <Circle
+              key={spot.id}
+              center={[spot.lat, spot.lng]}
+              pathOptions={{
+                fillColor: spotColor,
+                fillOpacity: 0.6,
+                color: spotColor,
+                weight: 0.5
+              }}
+              radius={getSecondaryCircleRadius() * 0.9}
+              eventHandlers={{
+                click: () => handleMarkerClick(spot)
+              }}
+            >
+              <Tooltip className="detailed-tooltip">
+                <div>
+                  <strong>{spot.name}</strong><br/>
+                  <span className="aqi-tag" style={{backgroundColor: spotColor, color: spotAqi > 150 ? 'white' : 'black'}}>
+                    AQI: {spotAqi} - {aqiCategory}
+                  </span><br/>
+                  <small>PM2.5: {spot.aqiData?.list[0]?.components.pm2_5.toFixed(1)} μg/m³</small>
+                </div>
+              </Tooltip>
+              <Popup>
+                <div className="location-popup">
+                  <h3>{spot.name}</h3>
+                  <div className="aqi-indicator" style={{ backgroundColor: spotColor }}>
+                    AQI: {spotAqi} - {aqiCategory}
+                  </div>
+                  <p>
+                    <strong>PM2.5:</strong> {spot.aqiData?.list[0]?.components.pm2_5.toFixed(2)} μg/m³<br />
+                    <strong>PM10:</strong> {spot.aqiData?.list[0]?.components.pm10.toFixed(2)} μg/m³<br />
+                    <strong>O₃:</strong> {spot.aqiData?.list[0]?.components.o3.toFixed(2)} μg/m³<br />
+                    <strong>NO₂:</strong> {spot.aqiData?.list[0]?.components.no2.toFixed(2)} μg/m³<br />
+                    <small className="coordinate-text">Coordinates: {spot.lat.toFixed(4)}, {spot.lng.toFixed(4)}</small>
+                  </p>
+                  <button onClick={() => handleMarkerClick(spot)} className="show-details-btn">
+                    Show in Sidebar
+                  </button>
+                </div>
+              </Popup>
+            </Circle>
+          );
+        })}
+
+        {/* Map controllers */}
         <MapController 
           coordinates={coordinates}
-          onDynamicLocationsChange={handleDynamicLocationsChange}
+          onSpotsUpdate={handleSpotsUpdate}
+          maxRandomSpots={maxRandomSpots}
         />
-        
-        {/* ZoomHandler to track zoom changes */}
         <ZoomHandler onZoomChange={handleZoomChange} />
       </MapContainer>
 
-      {/* Custom zoom controls positioned on the right */}
+      {/* Custom zoom controls */}
       <div className="custom-zoom-controls">
-        <button 
-          onClick={() => mapRef.current && mapRef.current.zoomIn()} 
-          className="zoom-control zoom-in"
-        >
-          +
-        </button>
-        <button 
-          onClick={() => mapRef.current && mapRef.current.zoomOut()} 
-          className="zoom-control zoom-out"
-        >
-          -
-        </button>
+        <button onClick={() => mapRef.current.zoomIn()} className="zoom-control zoom-in">+</button>
+        <button onClick={() => mapRef.current.zoomOut()} className="zoom-control zoom-out">-</button>
       </div>
 
       {/* Color Gradient Legend */}
       <ColorGradient />
 
-      {/* Legend */}
+      {/* AQI Legend */}
       <div className="map-legend">
         <h4>AQI Legend</h4>
         <div className="legend-item">
@@ -540,7 +496,7 @@ function Map({ coordinates, airQualityData, multiLocationData, onLocationSelect,
         </div>
       </div>
       
-      {/* Current time display */}
+      {/* Time display */}
       <div className="time-display">
         Data as of: {currentTime}
       </div>

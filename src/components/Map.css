@@ -1,152 +1,173 @@
 .map-container {
-    flex: 3;
-    height: 100%;
-    position: relative;
-  }
-  
-  .leaflet-container {
-    height: 100%;
-    width: 100%;
-  }
-  
-  .location-popup h3 {
-    margin: 0 0 10px 0;
-    color: #333;
-  }
-  
-  .aqi-indicator {
-    padding: 5px 10px;
-    margin-bottom: 10px;
-    border-radius: 4px;
-    font-weight: bold;
-    color: white;
-    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
-    text-align: center;
-  }
-  
-  .location-popup button {
-    background-color: #3498db;
-    color: white;
-    border: none;
-    padding: 8px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    width: 100%;
-    margin-top: 10px;
-    font-weight: 500;
-    transition: background-color 0.2s;
-  }
-  
-  .location-popup button:hover {
-    background-color: #2980b9;
-  }
-  
-  .map-legend {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    background-color: white;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
-    padding: 10px;
-    z-index: 1000;
-    max-width: 250px;
-  }
-  
-  .map-legend h4 {
-    margin: 0 0 10px 0;
-    text-align: center;
-    color: #333;
-  }
-  
-  .legend-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 5px;
-    font-size: 12px;
-  }
-  
-  .color-box {
-    display: inline-block;
-    width: 20px;
-    height: 12px;
-    margin-right: 8px;
-    border: 1px solid rgba(0,0,0,0.2);
-  }
-  
-  .custom-zoom-controls {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 1000;
-  }
-  
-  .zoom-control {
-    background-color: white;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 18px;
-    font-weight: bold;
-    width: 30px;
-    height: 30px;
-    line-height: 30px;
-    text-align: center;
-    cursor: pointer;
-    display: block;
-    margin-bottom: 5px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  }
-  
-  .zoom-control:hover {
-    background-color: #f5f5f5;
-  }
-  
-  /* Enhanced tooltip styling */
-  .leaflet-tooltip.detailed-tooltip {
-    background-color: rgba(255, 255, 255, 0.9);
-    border: none;
-    border-radius: 5px;
-    padding: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    font-size: 12px;
-    max-width: 200px;
-  }
-  
-  .aqi-tag {
-    display: inline-block;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: bold;
-    margin: 3px 0;
-  }
-  
-  .location-popup {
-    min-width: 220px;
-  }
-  
-  .coordinate-text {
-    display: block;
-    font-size: 11px;
-    color: #666;
-    margin-top: 5px;
-  }
-  
-  .timestamp-info {
-    font-size: 11px;
-    color: #666;
-    text-align: right;
-    margin-top: 5px;
-    font-style: italic;
-  }
-  
-  .time-display {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    background-color: rgba(255, 255, 255, 0.8);
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    color: #333;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  }
+  position: relative;
+  height: 100%;
+  width: 100%;
+  flex: 3;
+}
+
+/* Styles for custom zoom controls */
+.custom-zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.zoom-control {
+  width: 30px;
+  height: 30px;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.15);
+}
+
+.zoom-in {
+  margin-bottom: 5px;
+}
+
+.zoom-control:hover {
+  background-color: #f0f0f0;
+}
+
+/* Legend styles */
+.map-legend {
+  position: absolute;
+  bottom: 30px;
+  right: 10px;
+  background-color: white;
+  padding: 10px;
+  border-radius: 4px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-width: 250px;
+  font-size: 12px;
+}
+
+.map-legend h4 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.color-box {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+/* Tooltip and Popup styles */
+.leaflet-popup-content {
+  margin: 8px 12px;
+  line-height: 1.4;
+}
+
+.location-popup h3 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.aqi-indicator {
+  display: inline-block;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  color: black;
+  font-weight: 500;
+}
+
+.aqi-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+  margin-top: 3px;
+  margin-bottom: 3px;
+}
+
+.coordinate-text {
+  display: block;
+  margin-top: 6px;
+  color: #666;
+  font-size: 11px;
+}
+
+.timestamp-info {
+  font-size: 11px;
+  color: #666;
+  margin-top: 8px;
+  margin-bottom: 10px;
+}
+
+/* Show in Sidebar button styling */
+.show-details-btn {
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: 500;
+  margin-top: 8px;
+  transition: background-color 0.2s;
+}
+
+.show-details-btn:hover {
+  background-color: #357abD;
+}
+
+/* Time display at bottom of map */
+.time-display {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  z-index: 1000;
+}
+
+/* Detailed tooltip styling */
+.detailed-tooltip .leaflet-tooltip-content {
+  min-width: 150px;
+}
+
+/* Make tooltips more readable with background */
+.leaflet-tooltip {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* AQI circle hover effect */
+.leaflet-interactive:hover {
+  stroke-width: 3px;
+  stroke-opacity: 1;
+}
+
+/* Override default Leaflet popup close button */
+.leaflet-popup-close-button {
+  font-size: 18px !important;
+  padding: 5px 5px 0 0 !important;
+}
+
+/* Ensure circle tooltips are visible over other elements */
+.leaflet-tooltip {
+  z-index: 999 !important;
+}
